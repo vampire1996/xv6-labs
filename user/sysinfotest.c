@@ -44,12 +44,10 @@ testmem() {
   uint64 n = countfree();
   
   sinfo(&info);
-
   if (info.freemem!= n) {
     printf("FAIL: free mem %d (bytes) instead of %d\n", info.freemem, n);
     exit(1);
   }
-  
   if((uint64)sbrk(PGSIZE) == 0xffffffffffffffff){
     printf("sbrk failed");
     exit(1);
@@ -61,12 +59,10 @@ testmem() {
     printf("FAIL: free mem %d (bytes) instead of %d\n", n-PGSIZE, info.freemem);
     exit(1);
   }
-  
   if((uint64)sbrk(-PGSIZE) == 0xffffffffffffffff){
     printf("sbrk failed");
     exit(1);
   }
-
   sinfo(&info);
     
   if (info.freemem != n) {

@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -276,6 +277,9 @@ fork(void)
   np->sz = p->sz;
 
   np->parent = p;
+
+  //copy trace mask to the child process
+  np->trace_mask=p->trace_mask;
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -692,4 +696,15 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+uint64 processNum(void)
+{
+   struct proc *p;
+   uint64 cnt=0;
+   for(p=proc; p<&proc[NPROC]; p++)
+   {
+      if(p->state!=UNUSED) cnt++;
+   }
+   return cnt;
 }
