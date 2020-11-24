@@ -25,6 +25,7 @@ extern char trampoline[]; // trampoline.S
 void
 procinit(void)
 {
+  
   struct proc *p;
   
   initlock(&pid_lock, "nextpid");
@@ -42,6 +43,19 @@ procinit(void)
       p->kstack = va;
   }
   kvminithart();
+  
+   
+
+  /*
+  struct proc *p;
+  
+  initlock(&pid_lock, "nextpid");
+ 
+  for(p = proc; p < &proc[NPROC]; p++) {
+      initlock(&p->lock, "proc");
+  }
+  kvminithart();
+  */	
 }
 
 // Must be called with interrupts disabled,
@@ -96,18 +110,34 @@ allocproc(void)
 
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
+      
     if(p->state == UNUSED) {
       goto found;
     } else {
       release(&p->lock);
     }
   }
+
   return 0;
 
 found:
-  p->pid = allocpid();
+  // make sure that each process's kernel page table has a mapping for that process's kernel stack
+  // Allocate a page for the process's kernel stack.
+  // Map it high in memory, followed by an invalid
+  // guard page.
+  p->pid=allocpid();
+  /*
+  char *pa = kalloc();
+  if(pa == 0)
+  panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc));
+  kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  kvmmap_new(va, (uint64)pa, PGSIZE, PTE_R | PTE_W,p->kpagetable);
+  p->kstack = va;
+  */
+  
 
-  // Allocate a trapframe page.
+  // allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     release(&p->lock);
     return 0;
@@ -126,6 +156,17 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+  
+  // init the process's kernel page  
+  p->kpagetable=kvminit();	
+  // p->kpagetable=kvmcreate();
+ 
+  if(p->kpagetable==0)
+  {
+     freeproc(0);
+     release(&p->lock);
+     return 0;
+  }
 
   return p;
 }
@@ -141,7 +182,13 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->kpagetable)
+  {
+     free_kernel_pagetable(p->kpagetable,0);	  
+    //free_kpagetable(p->kpagetable);
+  }
   p->pagetable = 0;
+  p->kpagetable=0;
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -446,6 +493,8 @@ wait(uint64 addr)
   }
 }
 
+
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -467,22 +516,36 @@ scheduler(void)
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+     
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        
+        // switch to porcess's kernel page table	
+        w_satp(MAKE_SATP(p->kpagetable));
+        sfence_vma();//flushes the current CPU's TLB
+	
+
         swtch(&c->context, &p->context);
+        
+
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
 
+        // switch to overall pagetable
+        kvminithart();
+
         found = 1;
       }
       release(&p->lock);
     }
+   
 #if !defined (LAB_FS)
     if(found == 0) {
       intr_on();
