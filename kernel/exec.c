@@ -12,6 +12,7 @@ static int loadseg(pde_t *pgdir, uint64 addr, struct inode *ip, uint offset, uin
 int
 exec(char *path, char **argv)
 {
+  
   char *s, *last;
   int i, off;
   uint64 argc, sz = 0, sp, ustack[MAXARG+1], stackbase;
@@ -20,9 +21,9 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
-
+ 
   begin_op();
-
+  
   if((ip = namei(path)) == 0){
     end_op();
     return -1;
@@ -107,7 +108,11 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
-    
+  // kvmunmap(p->pagetable,p->kpagetable,0,oldsz/PGSIZE);
+ 
+
+
+
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
@@ -116,7 +121,14 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
+  uvmunmap(p->kpagetable,0,oldsz/PGSIZE,0);
+  // printf("exec kvm:%p\n",p->kpagetable);  
+  if(kvmmapuser(p->pagetable,p->kpagetable,0,sz)<0) goto bad;
+
+
   if(p->pid==1)vmprint(p->pagetable);
+  
+
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 

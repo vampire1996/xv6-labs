@@ -172,7 +172,7 @@ kvminit()
   	kvmmap(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
   	// CLINT
-  	kvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+   	kvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
   	// PLIC
  	 kvmmap(PLIC, PLIC, 0x400000, PTE_R | PTE_W);
@@ -313,7 +313,10 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
     if(*pte & PTE_V)
+    {
+      printf("pt:%p,va:%p,pa:%p\n",pagetable,va,pa);	    
       panic("remap");
+    }
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -535,6 +538,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
+  return copyin_new(pagetable,dst,srcva,len);	
+  /* 	
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -551,7 +556,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     dst += n;
     srcva = va0 + PGSIZE;
   }
-  return 0;
+  return 0;*/
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -561,6 +566,8 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
+  return copyinstr_new(pagetable, dst,  srcva, max);	
+  /*	
   uint64 n, va0, pa0;
   int got_null = 0;
 
@@ -594,8 +601,71 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
+  }*/
+}
+
+int
+kvmmapuser(pagetable_t uvm, pagetable_t kvm, uint64 start,uint64 sz)
+{
+  if(sz>=PLIC)
+  {  
+    return -1;	
+  }
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+  start = PGROUNDUP(start);
+  for(i = start; i < sz; i += PGSIZE){
+    if(i+PGSIZE>PLIC) break;	  
+    if((pte = walk(uvm, i, 0)) == 0)
+      panic("kvmmapuser: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("kvmmapuser: page not present");
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    // printf("kvm:%p,va:%p,pa:%p\n",kvm,i,pa);   	 
+    // if flag's PTE_U is set,kernel mode can not accsess it
+    // so flag's PTE_U need to be set to 0
+    if(mappages(kvm, i, PGSIZE, (uint64)pa, flags &(~PTE_U)) != 0){
+        //printf("%p\n",i);
+        goto err;
+    }
+  }
+  
+  return 0;
+
+ err:
+   uvmunmap(kvm, 0, i / PGSIZE, 0);
+  // kvmunmap(uvm,kvm,0,i/PGSIZE);
+  return -1;
+}
+
+void
+kvmunmap(pagetable_t uvm,pagetable_t kvm, uint64 va, uint64 npages)
+{
+  uint64 a;
+  pte_t *pte_u,*pte_k;
+
+  if((va % PGSIZE) != 0)
+    panic("uvmunmap: not aligned");
+
+  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    if((pte_u = walk(uvm, a, 0)) == 0)
+      panic("kvmunmap: walk");
+    if(*pte_u & PTE_U)continue;
+    if((pte_k = walk(kvm, a, 0)) == 0)
+      panic("kvmunmap: walk");
+    if((*pte_k & PTE_V) == 0)
+      panic("kvmunmap: not mapped");
+    if(PTE_FLAGS(*pte_k) == PTE_V)
+      panic("kvmunmap: not a leaf");
+    *pte_k = 0;
   }
 }
+
+
+
+
 int vmprintHelper(pagetable_t pagetable,int level)
 {
   

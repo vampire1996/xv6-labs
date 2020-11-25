@@ -159,6 +159,8 @@ found:
   
   // init the process's kernel page  
   p->kpagetable=kvminit();	
+  uvmunmap(p->kpagetable,CLINT,0x10000/PGSIZE,0);
+
   // p->kpagetable=kvmcreate();
  
   if(p->kpagetable==0)
@@ -266,6 +268,11 @@ userinit(void)
   // allocate one user page and copy init's instructions
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
+
+  // printf("user init kvm:%p\n",p->kpagetable); 
+  kvmmapuser(p->pagetable, p->kpagetable,0, PGSIZE) ;
+ 
+
   p->sz = PGSIZE;
 
   // prepare for the very first "return" from kernel to user.
@@ -278,6 +285,8 @@ userinit(void)
   p->state = RUNNABLE;
 
   release(&p->lock);
+ 
+
 }
 
 // Grow or shrink user memory by n bytes.
@@ -285,18 +294,30 @@ userinit(void)
 int
 growproc(int n)
 {
-  uint sz;
+  uint sz,oldsz,newsz;
   struct proc *p = myproc();
-
+  
   sz = p->sz;
+  oldsz=PGROUNDUP(p->sz);
+  newsz=PGROUNDUP(p->sz+n);
+  //uvmunmap(p->kpagetable,0,sz/PGSIZE,0);//unmap orignal uvm in kvm
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) { 
       return -1;
+    }
+    else
+    {
+      if( kvmmapuser(p->pagetable,p->kpagetable,oldsz,newsz)<0) return -1;// map new uvm to kvm
     }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    int npages = (oldsz - newsz) / PGSIZE;
+    uvmunmap(p->kpagetable, newsz, npages, 0);//unmap original uvm in kvm  
   }
-  p->sz = sz;
+ // printf("sbrk kvm:%p,sz:%p\n",p->kpagetable,sz); 
+  p->sz=sz; 
+ // kvmmapuser(p->pagetable,p->kpagetable,sz);// map new uvm to kvm
+  
   return 0;
 }
 
@@ -317,9 +338,11 @@ fork(void)
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
-    release(&np->lock);
-    return -1;
-  }
+    release(&np->lock); 
+    return -1; }
+  
+  
+
   np->sz = p->sz;
 
   np->parent = p;
@@ -341,6 +364,15 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
+
+  // printf("fork kvm:%p\n",np->kpagetable);  
+  if(kvmmapuser(np->pagetable, np->kpagetable,0, np->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+  
+  
 
   release(&np->lock);
 
