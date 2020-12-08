@@ -9,6 +9,8 @@
 struct spinlock tickslock;
 uint ticks;
 
+extern char trapframe_alarm[512]; 
+
 extern char trampoline[], uservec[], userret[];
 
 // in kernelvec.S, calls kerneltrap().
@@ -78,8 +80,24 @@ usertrap(void)
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
-    yield();
+  {
+    	  
+    //only when timer interrupts, process's alarm ticks can be manipulated
+    if(p->alarm_interval!=0 )//when alarm_interval==0 && alarm_handler==0, kernel should stop generating periodic alarm calls
+    { 
+	p->alarm_cnt+=1;
+        if(p->alarm_cnt==p->alarm_interval)
+        {
+           		
+           //timer outstanding,call the alarm function
+	    memmove(trapframe_alarm,p->trapframe,512);
+            p->trapframe->epc =p->alarm_handler;
+        }
+    }
+    yield();// give up cpu so that other threads can run
+    
 
+  }
   usertrapret();
 }
 

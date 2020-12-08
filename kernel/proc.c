@@ -21,6 +21,8 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+char trapframe_alarm[512];
+
 // initialize the proc table at boot time.
 void
 procinit(void)
@@ -41,7 +43,10 @@ procinit(void)
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
   }
+  //trapframe_alarm = (struct trapframe *)kalloc();
+
   kvminithart();
+
 }
 
 // Must be called with interrupts disabled,
@@ -113,6 +118,8 @@ found:
     return 0;
   }
 
+ 
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -126,7 +133,11 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  
+  // initialize alarm related fields  
+  p->alarm_interval=0;
+  p->alarm_handler=0;
+  p->alarm_cnt=0;	  
   return p;
 }
 
