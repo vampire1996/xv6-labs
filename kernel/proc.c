@@ -386,7 +386,7 @@ exit(int status)
   p->state = ZOMBIE;
 
   release(&original_parent->lock);
-
+  
   // Jump into the scheduler, never to return.
   sched();
   panic("zombie exit");
@@ -516,6 +516,7 @@ sched(void)
   intena = mycpu()->intena;
   swtch(&p->context, &mycpu()->context);
   mycpu()->intena = intena;
+ 
 }
 
 // Give up the CPU for one scheduling round.

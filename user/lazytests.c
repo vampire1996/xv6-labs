@@ -21,17 +21,17 @@ sparse_memory(char *s)
     exit(1);
   }
   new_end = prev_end + REGION_SZ;
-
   for (i = prev_end + PGSIZE; i < new_end; i += 64 * PGSIZE)
     *(char **)i = i;
-
+  // printf("prev_end:%p,new_end:%p\n",(uint64)prev_end,(uint64)new_end);
+  
   for (i = prev_end + PGSIZE; i < new_end; i += 64 * PGSIZE) {
     if (*(char **)i != i) {
       printf("failed to read value from memory\n");
       exit(1);
     }
   }
-
+  
   exit(0);
 }
 

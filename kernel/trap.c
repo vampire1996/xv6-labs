@@ -11,6 +11,8 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+extern char end[];
+
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -45,11 +47,13 @@ usertrap(void)
   // since we're now in the kernel.
   w_stvec((uint64)kernelvec);
 
+
   struct proc *p = myproc();
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
+
   if(r_scause() == 8){
     // system call
 
@@ -67,11 +71,41 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  }  else  if(r_scause()==13 || r_scause()==15){ // deal with page fault
+     
+    	 	 char* mem;
+
+    	 uint64 va=r_stval();//the virtual address that caused the page fault
+    	      
+         if(va>=p->sz)//killl a process if it page-faults on a virtual adress higher than any allocated with sbrk()
+	 {
+	    exit(-1);
+	 }
+         va=PGROUNDDOWN(va);     
+	 if(va<p->trapframe->sp)// va is below user stack,it's guard page 
+	 {
+	    exit(-1);
+	 }
+         
+ 
+	 mem=kalloc();//kalloc return 0 if memory cannot be allocated
+         if(mem==0)//handler out of memory
+       	 {
+	       exit(-1);//kalloc fails kill current process	
+          }
+          memset(mem,0,PGSIZE);
+          if(mappages(p->pagetable,va,PGSIZE,(uint64)mem,PTE_W|PTE_X|PTE_R|PTE_U)!=0)
+	  {
+	     kfree(mem);
+	      exit(-1);
+	  }  
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
+ 
 
   if(p->killed)
     exit(-1);
@@ -79,7 +113,7 @@ usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
-
+ 
   usertrapret();
 }
 
