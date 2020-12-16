@@ -66,6 +66,7 @@ runcmd(struct cmd *cmd)
 
   if(cmd == 0)
     exit(1);
+  
 
   switch(cmd->type){
   default:
@@ -165,7 +166,9 @@ main(void)
       continue;
     }
     if(fork1() == 0)
+    {
       runcmd(parsecmd(buf));
+    }
     wait(0);
   }
   exit(0);
@@ -329,14 +332,16 @@ parsecmd(char *s)
 {
   char *es;
   struct cmd *cmd;
-
+  
   es = s + strlen(s);
   cmd = parseline(&s, es);
+  
   peek(&s, es, "");
   if(s != es){
     fprintf(2, "leftovers: %s\n", s);
     panic("syntax");
   }
+ 
   nulterminate(cmd);
   return cmd;
 }
@@ -458,7 +463,7 @@ nulterminate(struct cmd *cmd)
 
   if(cmd == 0)
     return 0;
-
+  
   switch(cmd->type){
   case EXEC:
     ecmd = (struct execcmd*)cmd;

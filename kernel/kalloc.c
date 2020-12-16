@@ -11,8 +11,10 @@
 
 void freerange(void *pa_start, void *pa_end);
 
-extern char end[]; // first address after kernel.
-                   // defined by kernel.ld.
+extern char end[]; // first address after kernel.// defined by kernel.ld.
+
+
+uint64 refCnt[(PHYSTOP-KERNBASE)/PGSIZE];//reference count for each physical page
 
 struct run {
   struct run *next;
@@ -23,11 +25,30 @@ struct {
   struct run *freelist;
 } kmem;
 
+int refCntHelper(uint64 pa,char func)
+{
+   // printf("cnt:%c\n",func);	
+   if(pa>=KERNBASE && pa<=PHYSTOP)
+   {
+        
+       int idx=(pa-KERNBASE)/PGSIZE;// get the index in array refCnt corresponding to phiscal address pa
+       if(func=='+') refCnt[idx]++;
+       else if(func=='-') refCnt[idx]=refCnt[idx]==0?0:refCnt[idx]-1;
+       else if(func=='1') refCnt[idx]=1;
+       else if(func=='v') return refCnt[idx];// get value
+       return -1;
+   }
+   return 0;
+}
+
+
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
   freerange(end, (void*)PHYSTOP);
+  memset(refCnt,0,sizeof(refCnt));
 }
 
 void
@@ -45,11 +66,16 @@ freerange(void *pa_start, void *pa_end)
 // initializing the allocator; see kinit above.)
 void
 kfree(void *pa)
-{
+{	
   struct run *r;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
+ 
+  
+  // refCntHelper((uint64)pa,'-');
+
+  if(refCntHelper((uint64)pa,'v')!=0) return;// only when ref cnt is 0,do a page need to be freed
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
@@ -78,5 +104,9 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+  
+  // if(r) refCntHelper((uint64)r,'1');
+
+
   return (void*)r;
 }
