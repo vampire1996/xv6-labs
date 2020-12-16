@@ -178,7 +178,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
      if(*pte & PTE_V)
        panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
-    if(pagetable!=kernel_pagetable) refCntHelper(pa,'+');//when a new user pagetable refer to a phisical page, increment a page's reference count
+    // if(pagetable!=kernel_pagetable) refCntHelper(pa,'+');//when a new user pagetable refer to a phisical page, increment a page's reference count
 
     if(a == last)
       break;
@@ -207,10 +207,10 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-     uint64 pa = PTE2PA(*pte);
-     if(pagetable!=kernel_pagetable) refCntHelper(pa,'-');//when a page is droped,decrease it's refcnt
+   // uint64 pa = PTE2PA(*pte);
+   // if(pagetable!=kernel_pagetable) refCntHelper(pa,'-');//when a page is droped,decrease it's refcnt
     if(do_free){
-      // uint64 pa = PTE2PA(*pte);
+       uint64 pa = PTE2PA(*pte);
       // if(refCntHelper(pa,'v')==0) printf("unmap:do free\n");
       kfree((void*)pa);
     }
@@ -343,29 +343,22 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte) & (~PTE_W);// clear PTE_W
-    flags |=PTE_C;
+    flags = PTE_FLAGS(*pte) ;
+
+    if(flags & PTE_W)
+    {
+       flags=(flags | PTE_C )& (~PTE_W);// set PTE_C clear PTE_W
+       *pte=PA2PTE(pa) | flags;
+    }
     if(mappages(new, i, PGSIZE, pa, flags) != 0){
        goto err;
     } 
-    // refCntHelper(pa,'+');
-    *pte &= ~PTE_W;// clear old pagetbale's pte PTE_W
-    *pte |= PTE_C;
-   
-    
-    /*
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
-    }*/
+    refCntHelper(pa,'+');
   }
   return 0;
 
  err:
-  uvmunmap(new, 0, i / PGSIZE, 0);//do not free physical page
+  uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
 }
 
@@ -393,19 +386,18 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    
+    if(deal_cow_page(pagetable,va0,0)!=0)
+    {
+	    return -1;
+    }
+
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
     {
 	return -1;
     }
     
-    int cow;
-    if((cow=deal_cow_page(pagetable,va0,0))<0)// no enuogh memory for kalloc()
-    {
-	    return -1;
-    }
-    else if(cow==1) pa0=walkaddr(pagetable,va0);//if it's a cow page,change pa0
-
     
     n = PGSIZE - (dstva - va0);
     if(n > len)
@@ -489,6 +481,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
 int deal_cow_page(pagetable_t pagetable,uint64 va ,int usertrap)
 {
+    if(va>MAXVA) return -1;	
     pte_t* pte;
     
     if((pte=walk(pagetable,va,0))==0) return -1;
@@ -501,20 +494,21 @@ int deal_cow_page(pagetable_t pagetable,uint64 va ,int usertrap)
 
 	 //encounter a COW page(write to a page with PTE_W clear
          char *new_pa=kalloc();
+	
          if(new_pa==0)
 	 {
 	    return -1;
 	 }
          memmove(new_pa,(char *)old_pa,PGSIZE); 
-	 uvmunmap(pagetable,va,1,0);
-         if(refCntHelper(old_pa,'v')==0) kfree((char*)old_pa);
+
+	 uvmunmap(pagetable,va,1,1);
+        
 	 if(mappages(pagetable,va,PGSIZE,(uint64)new_pa,flag|PTE_W)<0)
 	 {
-	     uvmunmap(pagetable,va,1,1); 
+	      uvmunmap(pagetable,va,1,1); 
 	     return -1;
 	 }
-         
-         if(!usertrap)return 1;	        
+          	 
 
     }
     else if(usertrap)

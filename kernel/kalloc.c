@@ -28,12 +28,12 @@ struct {
 int refCntHelper(uint64 pa,char func)
 {
    // printf("cnt:%c\n",func);	
-   if(pa>=KERNBASE && pa<=PHYSTOP)
+   if(pa>=(uint64)end && pa<=PHYSTOP)
    {
-        
-       int idx=(pa-KERNBASE)/PGSIZE;// get the index in array refCnt corresponding to phiscal address pa
+       int offset=pa-(uint64)end; 
+       int idx=offset/PGSIZE;
        if(func=='+') refCnt[idx]++;
-       else if(func=='-') refCnt[idx]=refCnt[idx]==0?0:refCnt[idx]-1;
+       else if(func=='-') refCnt[idx]==0?refCnt[idx]:refCnt[idx]--;
        else if(func=='1') refCnt[idx]=1;
        else if(func=='v') return refCnt[idx];// get value
        return -1;
@@ -72,9 +72,7 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
  
-  
-  // refCntHelper((uint64)pa,'-');
-
+   refCntHelper((uint64)pa,'-');
   if(refCntHelper((uint64)pa,'v')!=0) return;// only when ref cnt is 0,do a page need to be freed
 
   // Fill with junk to catch dangling refs.
@@ -105,7 +103,7 @@ kalloc(void)
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   
-  // if(r) refCntHelper((uint64)r,'1');
+  if(r) refCntHelper((uint64)r,'1');
 
 
   return (void*)r;

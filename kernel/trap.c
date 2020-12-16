@@ -74,10 +74,8 @@ usertrap(void)
   {
     
       uint64 va=r_stval();
-       if(va>=p->sz) exit(-1);
-     //  printf("page fault %p,%p,%p\n",PGROUNDDOWN(va),p->trapframe->sp,p->sz);
-      // if(va<p->trapframe->sp) exit(-1);
-      va=PGROUNDDOWN(va);
+      if(va>=MAXVA || (va<=PGROUNDDOWN(p->trapframe->sp) && va>=PGROUNDDOWN(p->trapframe->sp)-PGSIZE)) exit(-1);
+       va=PGROUNDDOWN(va);
       if(deal_cow_page(p->pagetable,va,1)<0)
       {
 	    exit(-1);  
