@@ -12,6 +12,24 @@
 
 
 struct thread {
+  /*stored registers*/
+  uint64 ra;
+  uint64 sp;
+
+  // callee-saved
+  uint64 s0;
+  uint64 s1;
+  uint64 s2;
+  uint64 s3;
+  uint64 s4;
+  uint64 s5;
+  uint64 s6;
+  uint64 s7;
+  uint64 s8;
+  uint64 s9;
+  uint64 s10;
+  uint64 s11;
+
   char       stack[STACK_SIZE]; /* the thread's stack */
   int        state;             /* FREE, RUNNING, RUNNABLE */
 
@@ -30,6 +48,7 @@ thread_init(void)
   // a RUNNABLE thread.
   current_thread = &all_thread[0];
   current_thread->state = RUNNING;
+  printf("t1:%p,t2%p,t3:%p,t4:%p\n",&all_thread[0],&all_thread[1],&all_thread[2],&all_thread[3]);
 }
 
 void 
@@ -55,14 +74,14 @@ thread_schedule(void)
     exit(-1);
   }
 
+
   if (current_thread != next_thread) {         /* switch threads?  */
     next_thread->state = RUNNING;
     t = current_thread;
     current_thread = next_thread;
     /* YOUR CODE HERE
-     * Invoke thread_switch to switch from t to next_thread:
-     * thread_switch(??, ??);
-     */
+     * Invoke thread_switch to switch from t to next_thread:*/ 
+    thread_switch((uint64)t,(uint64)next_thread);
   } else
     next_thread = 0;
 }
@@ -77,12 +96,16 @@ thread_create(void (*func)())
   }
   t->state = RUNNABLE;
   // YOUR CODE HERE
+  
+  t->ra=(uint64)func;
+  t->sp=(uint64)&t->stack[STACK_SIZE-1];
 }
 
 void 
 thread_yield(void)
 {
   current_thread->state = RUNNABLE;
+  //printf("cur:%p,sta:%d\n",current_thread,current_thread->state);
   thread_schedule();
 }
 
