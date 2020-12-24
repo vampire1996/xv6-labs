@@ -24,7 +24,7 @@
 #include "buf.h"
 
 
-#define NBUCKET 13
+#define NBUCKET 7
 
 extern uint ticks;
 
@@ -37,119 +37,17 @@ struct {
   // head.next is most recent, head.prev is least.
   // struct buf head;
   
-  // struct buf *table[NBUCKET];
-  // struct spinlock table_lock[NBUCKET];
 
-} bcache;
+} bcache[NBUCKET];
 
-struct buf *table[NBUCKET];
-struct spinlock table_lock[NBUCKET];
 
 
 static int show=0;
 
-static void insert(uint dev,uint blockno,struct buf **p,struct buf *n,struct buf *b)
+
+uint idx(uint blockno)
 {
-    // int i=blockno % NBUCKET;
-    // acquire(&table_lock[i]);	
-    // update value
-    b->dev = dev;
-    b->blockno = blockno;
-    b->valid = 0;
-    b->refcnt=1;
-
-    // insert a as the head of p
-    b->next=n;
-    *p=b;
-    
-    // release(&table_lock[i]);
-
-}
-
-static void update(uint dev,uint blockno,struct buf *b)
-{
-    // int i=blockno % NBUCKET;
-    // acquire(&table_lock[i]);	
-    // struct buf * ori=table[i];
-
-    // update value
-    b->dev = dev;
-    b->blockno = blockno;
-    b->valid = 0;
-    b->refcnt=1;
-    
-   /* if(b==b->next)
-    {
-         printf("diff same  table %p,next:%p,original table:%p\n",b,b->next,ori);
-    }*/
-
-
-    // release(&table_lock[i]);
-
-}
-
-
-
-static struct buf* get(uint dev, uint blockno)
-{
-   int i= blockno % NBUCKET; 
-  
-
-   struct buf *b=0;
-   int j=0;
-   for(b=table[i];b!=0;b=b->next,j++)
-   {
-     /* if(j>2000)
-     {	     
-        printf("get:%p\n",b);	
-        panic("get block");	
-     }*/
-     if(b->dev==dev && b->blockno == blockno)
-     {    
-         break;
-     }
-   }
-   return b;
- 
-}
-
-
-
-
-static void remove(struct buf *b_cur)
-{
-   int i=b_cur->blockno % NBUCKET; 
-  
-   if(show) printf("remove:%d\n",i);
-
-   struct buf *b=0;
-   // acquire(&table_lock[i]);
-   if(table[i]==b_cur) 
-   {
-        table[i]=table[i]->next;
-       //	printf("remove:%p,new:%p\n",b_cur,table[i]);   
-   }
-   else
-   {
-     for(b=table[i];b!=0;b=b->next)
-     {
-       if(b->next==b_cur)
-       {
-         break;
-       }
-      }
-     if(b!=0 && b->next==b_cur){   
-        b->next=b_cur->next;
-	/*
-	if(b->next)printf("remove:%p,new:%p,%p\n",b_cur,b,b->next);   
-	else printf("remove:%p empty,new:%p\n",b_cur,b);*/   
-
-      }
-   }
-   b_cur->next=0;
-   // release(&table_lock[i]);
-   if(show) printf("remove exit:%d\n",i);
-
+   return blockno % NBUCKET;
 }
 
 
@@ -157,7 +55,19 @@ void
 binit(void)
 {
   struct buf *b;
+  
+  
+  for(int i=0;i<NBUCKET;i++) 
+  {  
+      	for(b = bcache[i].buf; b < bcache[i].buf+NBUF; b++){ 
+             initsleeplock(&b->lock, "buffer");
+         }
+      initlock(&bcache[i].lock, "bcache.bucket");
+  }
 
+  if(show) printf("binit\n");
+  
+  /*
   initlock(&bcache.lock, "bcache");
 
 
@@ -165,15 +75,6 @@ binit(void)
   
     initsleeplock(&b->lock, "buffer");
   }
-
-  for(int i=0;i<NBUCKET;i++) 
-  {  
-      initlock(&table_lock[i], "bcache.bucket");
-  }
-
-
-  
-  /*
   // Create linked list of buffers
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
@@ -196,109 +97,44 @@ bget(uint dev, uint blockno)
   
   struct buf *b=0;
 
-  int i= blockno % NBUCKET;
+  int i= idx(blockno);
+  uint min_time_stamp=-1;
+  struct buf *min_b=0;
   
-  if(show)printf("bget:%d\n",i);
-  acquire(&table_lock[i]);
+
+  acquire(&bcache[i].lock);
 
 
   // Is the block already cached?
-  if((b=get(dev,blockno))!=0)
-  {
-     b->refcnt++;
-     release(&table_lock[i]);
-     if(show) printf("bget exit:%d\n",i);
-     acquiresleep(&b->lock);
+  for(b = bcache[i].buf; b < bcache[i].buf+NBUF; b++){  
+          if(b->dev==dev && b->blockno == blockno)
+          {    
+              b->refcnt++;
+              release(&bcache[i].lock);
+              acquiresleep(&b->lock);
+              return b;
+          }
+          if(b->refcnt==0 && b->time_stamp<min_time_stamp)
+          {
+	     min_time_stamp=b->time_stamp;
+	     min_b=b;
+          }
+      
+ }
 
-     return b;
-  }
-  
-  // release(&table_lock[i]); 
-
-  // acquire(&bcache.lock);
-
-  uint min_time_stamp=-1;
-  struct buf *min_b=0;
-  // Not cached.
-  // Recycle the least recently used (LRU) unused buffer.
-  for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-     int j=b->blockno % NBUCKET;	  
-     if(j!=i) acquire(&table_lock[j]);	  
-	  
-     if(b->refcnt==0 && b->time_stamp<min_time_stamp)
-     {
-	 min_time_stamp=b->time_stamp;
-	 min_b=b;
-     }
-     if(j!=i) release(&table_lock[j]);
-  }
-  
   b=min_b;
   if(b!=0)
   {
-     int j=b->blockno % NBUCKET;	  
-     if(j!=i) acquire(&table_lock[j]);	  
-     if( j != i  )//new block hash to the different bucket as the old block
-     {
-	    remove(b);//remove b from original table
-             release(&table_lock[j]);
-            // acquire(&table_lock[i]);	
-             insert(dev,blockno,&table[i],table[i],b);// insert b to table[i]
-            //  release(&table_lock[j]);	
-
-      }	 
-     else
-     {
-             // new block hash to the same bucket as the old block
-	     // just update value,no need to insert b to table[i] 
-	     update(dev,blockno,b); 
-             // release(&table_lock[j]);
-
-     }
-	 release(&table_lock[i]);
-	 // release(&bcache.lock);
-	 if(show) printf("bget and bcache exit:%d\n",i);
+	 b->dev = dev;
+         b->blockno = blockno;
+         b->valid = 0;
+         b->refcnt = 1;
+	 release(&bcache[i].lock);
          acquiresleep(&b->lock);
          return b;
-    
-
   } 
 
-  // if(min_time_stamp==-1) printf("no buffers\n");
-  /* 
-  for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-     int j=b->blockno % NBUCKET;	  
-     acquire(&table_lock[j]);	  
-
-     if(b->refcnt==0 && b->time_stamp==min_time_stamp)
-     {
-         if(show) printf("bget:bcache exit %d\n",i);
-
-	 // if(table[i]!=b &&  b->blockno % NBUCKET != i  )//new block hash to the different bucket as the old block
-	  if( j != i  )//new block hash to the different bucket as the old block
-	 {
-	     remove(b);//remove b from original table
-             acquire(&table_lock[i]);	
-             insert(dev,blockno,&table[i],table[i],b);// insert b to table[i]
-             release(&table_lock[i]);	
-
-	 }	 
-	 else
-	 {
-             // new block hash to the same bucket as the old block
-	     // just update value,no need to insert b to table[i] 
-
-	     update(dev,blockno,b);
-	 }
-	 
-	 
-	 release(&table_lock[i]);
-	 if(show) printf("bget and bcache exit:%d\n",i);
-         acquiresleep(&b->lock);
-         return b;
-     }
-     if(i!=j) release(&table_lock[j]);
-  }*/
+  
   panic("bget: no buffers");
 
 	 
@@ -363,18 +199,16 @@ brelse(struct buf *b)
     panic("brelse");
  
   releasesleep(&b->lock);
-  int i=b->blockno % NBUCKET;
-  if(show) printf("brelse:%d\n",i);
+  int i=idx(b->blockno);
 
-  acquire(&table_lock[i]);
+  acquire(&bcache[i].lock);
   b->refcnt--;
   
   if (b->refcnt == 0) {
     // no one is waiting for it.
     b->time_stamp=ticks;
   }
-  release(&table_lock[i]);
-  if(show) printf("brelese exit:%d\n",i);
+  release(&bcache[i].lock);
 
   /*
   releasesleep(&b->lock);
@@ -402,10 +236,10 @@ bpin(struct buf *b) {
   release(&bcache.lock);
   */
   
-  int i=b->blockno % NBUCKET;	
-  acquire(&table_lock[i]);	
+  int i=idx(b->blockno);	
+  acquire(&bcache[i].lock);	
   b->refcnt++;
-  release(&table_lock[i]);	
+  release(&bcache[i].lock);	
 	     
  
 }
@@ -417,10 +251,10 @@ bunpin(struct buf *b) {
   b->refcnt--;
   release(&bcache.lock);*/
 
-  int i=b->blockno % NBUCKET;	
-  acquire(&table_lock[i]);	
+  int i=idx(b->blockno);	
+  acquire(&bcache[i].lock);	
   b->refcnt--;
-  release(&table_lock[i]);	
+  release(&bcache[i].lock);	
 		
   
 }
